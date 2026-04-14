@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="he">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>כובש השטחים</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background: #0d0d1a;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  min-height: 100vh;
+  font-family: 'Segoe UI', Arial, sans-serif;
+  color: #fff; direction: rtl;
+  user-select: none; -webkit-user-select: none;
+  transition: background 1s;
+}
+h1 { font-size: 24px; margin-bottom: 8px; transition: color 0.8s; }
+#hud { display: flex; gap: 12px; margin-bottom: 8px; font-size: 14px; font-weight: bold; }
+.chip {
+  background: rgba(255,255,255,0.08);
+  padding: 4px 14px; border-radius: 20px;
+  display: flex; align-items: center; gap: 5px;
+}
+canvas {
+  display: block;
+  border: 2px solid rgba(255,255,255,0.12);
+  border-radius: 4px; transition: border-color 1s, box-shadow 1s;
+}
+#hint { margin-top: 6px; font-size: 12px; opacity: 0.4; text-align: center; }
+#overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,0.82);
+  align-items: center; justify-content: center; z-index: 20;
+}
+#overlay.show { display: flex; }
+.modal {
+  background: #12122a;
+  border: 2px solid rgba(255,255,255,0.2);
+  border-radius: 14px; padding: 28px 36px; text-align: center;
+}
+.modal h2 { font-size: 24px; margin-bottom: 8px; }
+.modal p  { margin-bottom: 20px; opacity: 0.75; font-size: 14px; }
+.btn-row { display: flex; gap: 10px; justify-content: center; }
+.modal button {
+  padding: 10px 24px; border: none; border-radius: 7px;
+  color: white; font-size: 15px; cursor: pointer; transition: opacity 0.2s;
+}
+.modal button:hover { opacity: 0.8; }
+#btnRestart { background: #555; }
+#btnNext    { background: #7b2ff7; display: none; }
+</style>
+</head>
+<body>
+
+<h1 id="title">⚡ כובש השטחים</h1>
+
+<div id="hud">
+  <div class="chip">❤️ <span id="livesEl">3</span></div>
+  <div class="chip">📊 <span id="pctEl">0</span>%</div>
+  <div class="chip" id="levelChip">⭐ שלב 1</div>
+  <div class="chip">🎯 יעד: <span id="goalEl">60</span>%</div>
+</div>
+
+<canvas id="c"></canvas>
+<div id="hint">חצי מקלדת לזוז · סגור שטח — כבוש! · כדור/קורה בקו — תמות · Space — מחדש</div>
+
+<div id="overlay">
+  <div class="modal" id="modal">
+    <h2 id="oTitle">-</h2>
+    <p  id="oMsg">-</p>
+    <div class="btn-row">
+      <button id="btnNext"    onclick="nextLevel()">שלב הבא</button>
+      <button id="btnRestart" onclick="init()">שחק שוב</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Constants ─────────────────────────────────────────────────────────────────
+const W = 52, H = 38, CS = 13;
+const WIN_PCT    = { 1: 0.60, 2: 0.75, 3: 0.75 };
+const PLAYER_SPD = 7;
+const EMPTY = 0, FILLED = 1, TAIL = 2;
+const MAX_WEB = 90;   // max trail points per spider
+
+// ── Canvas ────────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+canvas.width = W * CS; canvas.height = H * CS;
+const ctx = canvas.getContext('2d');
+const inB = (x, y) => x >= 0 && x < W && y >= 0 && y < H;
+
+// ── Level themes ──────────────────────────────────────────────────────────────
+const THEMES = {
+  1: {
+    bodyBg: '#0d0d1a', emptyColor: '#141428',
+    fillColor: '#1a4a7a', tailColor: '#5dade2', playerGlow: '#5dade2',
+    ringColor: 'rgba(93,173,226,0.45)',
+    canvasBorder: 'rgba(255,255,255,0.12)', canvasShadow: 'none',
+    ballSpd: 0.09, spiders: false,
+    ballDefs: [
+      {x:8.5,    y:9.5,    dx:1.1,  dy:0.9,  c:['#e74c3c','#f5b7b1']},
+      {x:W-10.5, y:15.5,   dx:-0.9, dy:1.2,  c:['#e74c3c','#f5b7b1']},
+      {x:W/2,    y:H-10.5, dx:1.0,  dy:-1.0, c:['#e74c3c','#f5b7b1']},
+      {x:20.5,   y:25.5,   dx:-1.2, dy:0.8,  c:['#e74c3c','#f5b7b1']},
+    ],
+    stars: false,
+    title: '⚡ כובש השטחים', chip: '⭐ שלב 1', nextIcon: '🚀',
+    nextMsg: 'עכשיו לחלל!',
+  },
+  2: {
+    bodyBg: '#00000a', emptyColor: null,
+    fillColor: '#3d0070', tailColor: '#cc44ff', playerGlow: '#cc44ff',
+    ringColor: 'rgba(180,50,255,0.55)',
+    canvasBorder: 'rgba(160,40,255,0.4)', canvasShadow: '0 0 30px rgba(140,0,255,0.3)',
+    ballSpd: 0.12, spiders: false,
+    ballDefs: [
+      {x:8.5,    y:9.5,    dx:1.1,  dy:0.9,  c:['#ff6b35','#ffb88a']},
+      {x:W-10.5, y:15.5,   dx:-0.9, dy:1.2,  c:['#00b4d8','#90e0ef']},
+      {x:W/2,    y:H-10.5, dx:1.0,  dy:-1.0, c:['#2ecc71','#a8e6cf']},
+      {x:20.5,   y:25.5,   dx:-1.2, dy:0.8,  c:['#f1c40f','#f9e79f']},
+      {x:W-8.5,  y:H-8.5,  dx:-1.1, dy:-0.9, c:['#e91e8c','#ff80c0']},
+    ],
+    stars: true,
+    title: '🚀 כובש החלל', chip: '🌌 שלב 2 — חלל', nextIcon: '🕷️',
+    nextMsg: 'עכשיו לעולם ספיידרמן!',
+  },
+  3: {
+    bodyBg: '#0d0003', emptyColor: null,
+    fillColor: '#8b0000', tailColor: '#1a44cc', playerGlow: '#4488ff',
+    ringColor: 'rgba(200,0,0,0.6)',
+    canvasBorder: 'rgba(200,0,0,0.5)', canvasShadow: '0 0 30px rgba(200,0,0,0.35)',
+    ballSpd: 0.08, spiders: true,
+    ballDefs: [
+      {x:8.5,    y:8.5,    dx:1.0,  dy:0.85},
+      {x:W-9.5,  y:9.5,    dx:-0.9, dy:1.0 },
+      {x:9.5,    y:H-9.5,  dx:1.1,  dy:-0.9},
+      {x:W-9.5,  y:H-9.5,  dx:-1.0, dy:-1.0},
+    ],
+    stars: false,
+    title: '🕷️ ספיידרמן — כובש השטחים', chip: '🕸️ שלב 3 — ספיידרמן', nextIcon: null,
+    nextMsg: null,
+  },
+};
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let grid, player, balls, lives, running, rafId, frame, keys, level, theme, stars;
+const inB2 = inB;
+
+// ── Stars (level 2) ───────────────────────────────────────────────────────────
+function genStars() {
+  stars = [];
+  for (let i = 0; i < 130; i++)
+    stars.push({ px: Math.random()*canvas.width, py: Math.random()*canvas.height,
+                 r: Math.random()*1.3+0.2, phase: Math.random()*Math.PI*2,
+                 spd: 0.018 + Math.random()*0.04 });
+}
+
+// ── Grid ──────────────────────────────────────────────────────────────────────
+function initGrid() {
+  grid = Array.from({length: H}, () => new Uint8Array(W));
+  for (let x = 0; x < W; x++) { grid[0][x] = FILLED; grid[H-1][x] = FILLED; }
+  for (let y = 0; y < H; y++) { grid[y][0] = FILLED; grid[y][W-1] = FILLED; }
+}
+
+// ── Start level ───────────────────────────────────────────────────────────────
+function startLevel(lvl) {
+  level = lvl; theme = THEMES[lvl];
+  initGrid(); frame = 0; running = true; keys = {};
+  player = { x: W>>1, y: 0, dx: 0, dy: 0, tail: [], hasTail: false, blink: 0 };
+
+  const spd = theme.ballSpd;
+  balls = theme.ballDefs.map(d => ({
+    x: d.x, y: d.y,
+    dx: spd * d.dx, dy: spd * d.dy,
+    c: d.c ?? ['#e74c3c','#f5b7b1'],
+    trail: theme.spiders ? [] : null,
+  }));
+
+  if (theme.stars) genStars(); else stars = [];
+
+  document.body.style.background                   = theme.bodyBg;
+  canvas.style.borderColor                         = theme.canvasBorder;
+  canvas.style.boxShadow                           = theme.canvasShadow;
+  document.getElementById('title').textContent     = theme.title;
+  document.getElementById('levelChip').textContent = theme.chip;
+  document.getElementById('goalEl').textContent    = WIN_PCT[lvl] * 100;
+
+  updateHUD();
+  if (rafId) cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(loop);
+}
+
+function init() {
+  document.getElementById('overlay').classList.remove('show');
+  document.getElementById('btnNext').style.display = 'none';
+  lives = 3; startLevel(1);
+}
+
+function nextLevel() {
+  document.getElementById('overlay').classList.remove('show');
+  document.getElementById('btnNext').style.display = 'none';
+  startLevel(level + 1);
+}
+
+// ── Claim territory ───────────────────────────────────────────────────────────
+function claimTerritory() {
+  for (const [tx, ty] of player.tail) grid[ty][tx] = FILLED;
+  player.tail = []; player.hasTail = false;
+  const reach = new Uint8Array(W * H);
+  for (const b of balls) {
+    const bx = Math.round(b.x)|0, by = Math.round(b.y)|0;
+    if (!inB(bx,by) || grid[by][bx] !== EMPTY) continue;
+    const i0 = by*W+bx;
+    if (reach[i0]) continue;
+    reach[i0] = 1;
+    const q = [bx, by]; let qi = 0;
+    while (qi < q.length) {
+      const qx = q[qi++], qy = q[qi++];
+      for (const [nx,ny] of [[qx-1,qy],[qx+1,qy],[qx,qy-1],[qx,qy+1]]) {
+        if (!inB(nx,ny)) continue;
+        const i = ny*W+nx;
+        if (!reach[i] && grid[ny][nx]===EMPTY) { reach[i]=1; q.push(nx,ny); }
+      }
+    }
+  }
+  for (let y=0;y<H;y++)
+    for (let x=0;x<W;x++)
+      if (grid[y][x]===EMPTY && !reach[y*W+x]) grid[y][x]=FILLED;
+}
+
+// ── Score ─────────────────────────────────────────────────────────────────────
+function filledPct() {
+  const border = W*2+(H-2)*2, inner = (W-2)*(H-2);
+  let n=0;
+  for (let y=0;y<H;y++) for (let x=0;x<W;x++) if (grid[y][x]===FILLED) n++;
+  return (n-border)/inner;
+}
+function updateHUD() {
+  document.getElementById('livesEl').textContent = lives;
+  document.getElementById('pctEl').textContent   = Math.max(0,Math.round(filledPct()*100));
+}
+
+// ── Die ───────────────────────────────────────────────────────────────────────
+function die() {
+  if (player.blink > 0) return;
+  for (const [tx,ty] of player.tail) if (grid[ty][tx]===TAIL) grid[ty][tx]=EMPTY;
+  player.tail=[]; player.hasTail=false; lives--;
+  if (lives <= 0) { running=false; showOverlay('נפלת! 💀',`הגעת ל-${Math.round(filledPct()*100)}% — נגמרו הלבבות`); return; }
+  player.x=W>>1; player.y=0; player.dx=0; player.dy=0; player.blink=150;
+}
+
+// ── Move player ───────────────────────────────────────────────────────────────
+function movePlayer() {
+  let wdx=0, wdy=0;
+  if      (keys['ArrowRight']){wdx=1;wdy=0;}
+  else if (keys['ArrowLeft']) {wdx=-1;wdy=0;}
+  else if (keys['ArrowDown']) {wdx=0;wdy=1;}
+  else if (keys['ArrowUp'])   {wdx=0;wdy=-1;}
+  if (wdx===0&&wdy===0){ if (!player.hasTail) return; wdx=player.dx; wdy=player.dy; }
+  if (player.hasTail && wdx===-player.dx && wdy===-player.dy){ wdx=player.dx; wdy=player.dy; }
+  player.dx=wdx; player.dy=wdy;
+  const nx=player.x+wdx, ny=player.y+wdy;
+  if (!inB(nx,ny)) return;
+  const cell=grid[ny][nx];
+  if (cell===TAIL){ die(); return; }
+  player.x=nx; player.y=ny;
+  if (cell===FILLED) {
+    if (player.hasTail) {
+      claimTerritory();
+      const pct=filledPct();
+      if (pct>=WIN_PCT[level]) {
+        running=false;
+        if (level < 3) {
+          document.getElementById('btnNext').textContent = `שלב הבא ${theme.nextIcon}`;
+          document.getElementById('btnNext').style.display = 'inline-block';
+          showOverlay(`שלב ${level} הושלם! ✨`, theme.nextMsg);
+        } else {
+          showOverlay('ניצחת! 🏆🕷️', `כיבשת ${Math.round(pct*100)}% — אלוף על!`);
+        }
+      }
+    }
+  } else {
+    grid[ny][nx]=TAIL; player.tail.push([nx,ny]); player.hasTail=true;
+  }
+}
+
+// ── Move ball / spider ────────────────────────────────────────────────────────
+function moveBall(b) {
+  let nx=b.x+b.dx;
+  const cy=Math.round(b.y)|0, cxN=(b.dx>0?Math.ceil(nx-0.01):Math.floor(nx))|0;
+  if (nx<1.01||nx>W-2.01||(inB(cxN,cy)&&grid[cy][cxN]===FILLED)){ b.dx=-b.dx; nx=b.x+b.dx; }
+  b.x=Math.max(1.01,Math.min(W-2.01,nx));
+
+  let ny2=b.y+b.dy;
+  const cx2=Math.round(b.x)|0, cyN=(b.dy>0?Math.ceil(ny2-0.01):Math.floor(ny2))|0;
+  if (ny2<1.01||ny2>H-2.01||(inB(cx2,cyN)&&grid[cyN][cx2]===FILLED)){ b.dy=-b.dy; ny2=b.y+b.dy; }
+  b.y=Math.max(1.01,Math.min(H-2.01,ny2));
+
+  // Store web trail for spiders
+  if (b.trail !== null) {
+    b.trail.push({ px: b.x * CS + CS/2, py: b.y * CS + CS/2 });
+    if (b.trail.length > MAX_WEB) b.trail.shift();
+  }
+}
+
+// ── Collision ─────────────────────────────────────────────────────────────────
+function checkCollisions() {
+  if (player.blink > 0) return;
+
+  // Ball / spider body collision
+  for (const b of balls) {
+    if (Math.abs(b.x-player.x)<0.85 && Math.abs(b.y-player.y)<0.85) { die(); return; }
+    for (const [tx,ty] of player.tail) {
+      if (Math.abs(b.x-tx)<0.85 && Math.abs(b.y-ty)<0.85) { die(); return; }
+    }
+  }
+
+  // Web trail collision (level 3 only)
+  if (theme.spiders && player.hasTail) {
+    // Build set of grid cells covered by webs
+    const webSet = new Set();
+    for (const b of balls) {
+      for (const tp of b.trail) {
+        webSet.add((tp.px/CS|0) + (tp.py/CS|0) * W);
+      }
+    }
+    for (const [tx,ty] of player.tail) {
+      if (webSet.has(tx + ty*W)) { die(); return; }
+    }
+  }
+}
+
+// ── Draw: web background (level 3) ───────────────────────────────────────────
+function drawWebBg() {
+  ctx.fillStyle = '#0d0003';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const cx = canvas.width/2, cy = canvas.height/2;
+  const maxR = Math.sqrt(cx*cx+cy*cy)+20;
+
+  ctx.strokeStyle = 'rgba(160,0,0,0.10)';
+  ctx.lineWidth = 0.6;
+  // Radial spokes
+  for (let a=0; a<Math.PI*2; a+=Math.PI/9) {
+    ctx.beginPath();
+    ctx.moveTo(cx,cy);
+    ctx.lineTo(cx+Math.cos(a)*maxR, cy+Math.sin(a)*maxR);
+    ctx.stroke();
+  }
+  // Concentric rings
+  for (let r=35; r<maxR; r+=35) {
+    ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
+  }
+}
+
+// ── Draw: spider-man sprite ───────────────────────────────────────────────────
+function drawSpider(bx, by) {
+  const br = CS/2 + 1;
+
+  // Glow
+  ctx.shadowBlur  = 16;
+  ctx.shadowColor = '#cc0000';
+
+  // Red body
+  ctx.fillStyle = '#cc0000';
+  ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI*2); ctx.fill();
+
+  // Black web lines on face
+  ctx.strokeStyle = 'rgba(0,0,0,0.65)';
+  ctx.lineWidth = 0.8;
+  for (let a=0; a<Math.PI*2; a+=Math.PI/5) {
+    ctx.beginPath(); ctx.moveTo(bx,by);
+    ctx.lineTo(bx+Math.cos(a)*br, by+Math.sin(a)*br); ctx.stroke();
+  }
+  ctx.beginPath(); ctx.arc(bx, by, br*0.5, 0, Math.PI*2); ctx.stroke();
+
+  // White spider-man eyes
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = 'white';
+  ctx.save();
+  ctx.translate(bx - br*0.30, by - br*0.08);
+  ctx.rotate(-0.38);
+  ctx.beginPath(); ctx.ellipse(0, 0, br*0.30, br*0.17, 0, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+  ctx.save();
+  ctx.translate(bx + br*0.30, by - br*0.08);
+  ctx.rotate(0.38);
+  ctx.beginPath(); ctx.ellipse(0, 0, br*0.30, br*0.17, 0, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+
+  ctx.shadowBlur = 0;
+}
+
+// ── Draw: web trail ───────────────────────────────────────────────────────────
+function drawWebTrail(trail) {
+  if (trail.length < 2) return;
+  ctx.strokeStyle = 'rgba(230,230,230,0.45)';
+  ctx.lineWidth   = 1.0;
+  ctx.lineCap     = 'round';
+  ctx.beginPath();
+  ctx.moveTo(trail[0].px, trail[0].py);
+  for (let i=1; i<trail.length; i++) ctx.lineTo(trail[i].px, trail[i].py);
+  ctx.stroke();
+}
+
+// ── Draw: territory border glow (level 2) ────────────────────────────────────
+function drawFillGlow() {
+  ctx.strokeStyle = 'rgba(180,80,255,0.18)';
+  ctx.lineWidth = 1;
+  for (let y=0;y<H;y++) {
+    for (let x=0;x<W;x++) {
+      if (grid[y][x]!==FILLED) continue;
+      const hasEmpty =
+        (inB(x-1,y)&&grid[y][x-1]===EMPTY)||(inB(x+1,y)&&grid[y][x+1]===EMPTY)||
+        (inB(x,y-1)&&grid[y-1]?.[x]===EMPTY)||(inB(x,y+1)&&grid[y+1]?.[x]===EMPTY);
+      if (hasEmpty) {
+        ctx.shadowBlur=6; ctx.shadowColor='#cc44ff';
+        ctx.strokeRect(x*CS+0.5,y*CS+0.5,CS-1,CS-1);
+        ctx.shadowBlur=0;
+      }
+    }
+  }
+}
+
+// ── Main draw ─────────────────────────────────────────────────────────────────
+function draw() {
+  // ─ Level 3: Spider-Man ─
+  if (theme.spiders) {
+    drawWebBg();
+    // Web trails (behind spiders)
+    for (const b of balls) if (b.trail) drawWebTrail(b.trail);
+    // Filled/tail cells only
+    for (let y=0;y<H;y++) for (let x=0;x<W;x++) {
+      if (grid[y][x]===EMPTY) continue;
+      ctx.fillStyle = grid[y][x]===FILLED ? theme.fillColor : theme.tailColor;
+      ctx.fillRect(x*CS,y*CS,CS,CS);
+    }
+    // Filled border glow (red tint)
+    ctx.strokeStyle='rgba(200,50,50,0.25)'; ctx.lineWidth=1;
+    for (let y=0;y<H;y++) for (let x=0;x<W;x++) {
+      if (grid[y][x]!==FILLED) continue;
+      const hasEmpty=(inB(x-1,y)&&grid[y][x-1]===EMPTY)||(inB(x+1,y)&&grid[y][x+1]===EMPTY)||
+        (inB(x,y-1)&&grid[y-1]?.[x]===EMPTY)||(inB(x,y+1)&&grid[y+1]?.[x]===EMPTY);
+      if (hasEmpty){ ctx.shadowBlur=5;ctx.shadowColor='#ff2222';ctx.strokeRect(x*CS+0.5,y*CS+0.5,CS-1,CS-1);ctx.shadowBlur=0; }
+    }
+  }
+  // ─ Level 2: Space ─
+  else if (theme.stars) {
+    ctx.fillStyle='#00000a'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    const neb=(cx,cy,cr,col)=>{ const g=ctx.createRadialGradient(cx,cy,0,cx,cy,cr);g.addColorStop(0,col);g.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=g;ctx.fillRect(0,0,canvas.width,canvas.height); };
+    neb(canvas.width*.25,canvas.height*.35,canvas.width*.38,'rgba(90,0,140,0.18)');
+    neb(canvas.width*.75,canvas.height*.65,canvas.width*.32,'rgba(0,40,120,0.14)');
+    neb(canvas.width*.55,canvas.height*.2, canvas.width*.25,'rgba(120,0,80,0.10)');
+    for (const s of stars){ s.phase+=s.spd; const a=(0.25+0.75*(0.5+0.5*Math.sin(s.phase))).toFixed(2); ctx.fillStyle=`rgba(255,255,255,${a})`; ctx.beginPath();ctx.arc(s.px,s.py,s.r,0,Math.PI*2);ctx.fill(); }
+    for (let y=0;y<H;y++) for (let x=0;x<W;x++) {
+      if (grid[y][x]===EMPTY) continue;
+      ctx.fillStyle=grid[y][x]===FILLED?theme.fillColor:theme.tailColor;
+      ctx.fillRect(x*CS,y*CS,CS,CS);
+    }
+    drawFillGlow();
+  }
+  // ─ Level 1: Normal ─
+  else {
+    for (let y=0;y<H;y++) for (let x=0;x<W;x++) {
+      ctx.fillStyle=grid[y][x]===FILLED?theme.fillColor:grid[y][x]===TAIL?theme.tailColor:theme.emptyColor;
+      ctx.fillRect(x*CS,y*CS,CS,CS);
+    }
+    ctx.strokeStyle='rgba(255,255,255,0.03)'; ctx.lineWidth=0.5;
+    for (let i=0;i<=W;i++){ctx.beginPath();ctx.moveTo(i*CS,0);ctx.lineTo(i*CS,H*CS);ctx.stroke();}
+    for (let i=0;i<=H;i++){ctx.beginPath();ctx.moveTo(0,i*CS);ctx.lineTo(W*CS,i*CS);ctx.stroke();}
+  }
+
+  // Border ring
+  ctx.strokeStyle=theme.ringColor; ctx.lineWidth=1.5;
+  ctx.strokeRect(CS+1,CS+1,(W-2)*CS-2,(H-2)*CS-2);
+
+  // Progress bar
+  ctx.fillStyle=theme.tailColor+'55';
+  ctx.fillRect(CS,CS,(W-2)*CS*filledPct(),3);
+
+  // Player
+  if (player.blink===0||(frame>>2)&1) {
+    const px=player.x*CS+CS/2, py=player.y*CS+CS/2, r=CS/2-1;
+    ctx.shadowBlur=16; ctx.shadowColor=theme.playerGlow;
+    ctx.fillStyle='#ffffff'; ctx.beginPath();ctx.arc(px,py,r,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=theme.playerGlow; ctx.beginPath();ctx.arc(px,py,r-3,0,Math.PI*2);ctx.fill();
+    ctx.shadowBlur=0;
+  }
+
+  // Enemies
+  for (const b of balls) {
+    const bx=b.x*CS+CS/2, by=b.y*CS+CS/2, br=CS/2;
+    if (theme.spiders) {
+      drawSpider(bx, by);
+    } else {
+      ctx.shadowBlur=14; ctx.shadowColor=b.c[0];
+      ctx.fillStyle=b.c[0]; ctx.beginPath();ctx.arc(bx,by,br,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle=b.c[1]; ctx.beginPath();ctx.arc(bx-br*.3,by-br*.3,br*.35,0,Math.PI*2);ctx.fill();
+      ctx.shadowBlur=0;
+    }
+  }
+}
+
+// ── Game loop ─────────────────────────────────────────────────────────────────
+function loop() {
+  if (!running) { draw(); return; }
+  frame++;
+  if (player.blink>0) player.blink--;
+  if (frame%PLAYER_SPD===0) movePlayer();
+  for (const b of balls) moveBall(b);
+  checkCollisions();
+  updateHUD();
+  draw();
+  rafId=requestAnimationFrame(loop);
+}
+
+// ── Overlay ───────────────────────────────────────────────────────────────────
+function showOverlay(title,msg) {
+  document.getElementById('oTitle').textContent=title;
+  document.getElementById('oMsg').textContent=msg;
+  document.getElementById('overlay').classList.add('show');
+}
+
+// ── Input ─────────────────────────────────────────────────────────────────────
+window.addEventListener('keydown', e=>{
+  keys[e.key]=true;
+  if (e.key===' '){ e.preventDefault(); init(); }
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
+});
+window.addEventListener('keyup', e=>{ keys[e.key]=false; });
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
