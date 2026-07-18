@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="he">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>משחק — פלטפורמת המשחקים</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<a class="back-link" href="index.html">⟵ לגלריה</a>
+
+<div class="play-wrap">
+  <h1 id="title" style="font-size:22px;">-</h1>
+  <div id="hud"></div>
+  <canvas id="c"></canvas>
+  <div id="hint"></div>
+</div>
+
+<div id="overlay">
+  <div class="modal">
+    <h2 id="oTitle">-</h2>
+    <p id="oMsg">-</p>
+    <div class="btn-row">
+      <button class="btn" id="btnRestart">🔁 שחק שוב</button>
+      <button class="btn secondary" onclick="location.href='index.html'">🏠 לגלריה</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/storage.js"></script>
+<script src="js/templates/territory.js"></script>
+<script src="js/templates/snake.js"></script>
+<script src="js/templates/dodger.js"></script>
+<script src="js/play.js"></script>
+</body>
+</html>

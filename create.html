@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="he">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>יצירת משחק חדש — פלטפורמת המשחקים</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="wrap">
+  <header class="top">
+    <h1>🛠️ יצירת משחק חדש</h1>
+    <a class="btn ghost" href="index.html">⟵ חזרה לגלריה</a>
+  </header>
+
+  <div class="form-section">
+    <h2>1. בחר סוג משחק</h2>
+    <div class="templates" id="templates"></div>
+  </div>
+
+  <div id="fields"></div>
+
+  <div class="actions">
+    <button class="btn secondary" onclick="location.href='index.html'">ביטול</button>
+    <button class="btn" id="btnSave" disabled>💾 שמור וצא לשחק</button>
+  </div>
+</div>
+
+<script src="js/storage.js"></script>
+<script src="js/create.js"></script>
+</body>
+</html>
